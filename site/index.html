@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#f5f7f8" />
+  <title>小红书矩阵账号运营看板</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <main id="login" class="login-page">
+    <section class="login-card">
+      <span class="brand-mark">RED</span>
+      <p class="kicker">经营数据加密访问</p>
+      <h1>小红书矩阵账号<br />运营看板</h1>
+      <p class="intro">输入访问密码，在浏览器本地解密 12 个渠道的订单、佣金、成交与趋势数据。</p>
+      <form id="login-form">
+        <label for="password">访问密码</label>
+        <div class="password-row"><input id="password" type="password" autocomplete="current-password" required placeholder="请输入密码" /><button type="button" id="show-password" aria-label="显示密码">显示</button></div>
+        <p id="login-error" class="error" hidden></p>
+        <button class="primary" type="submit">进入看板</button>
+      </form>
+      <small>数据采用 AES-256-GCM 加密；更换密码后，旧密码会在下一次数据更新时失效。</small>
+    </section>
+  </main>
+
+  <main id="dashboard" class="shell" hidden>
+    <header class="topbar">
+      <div><div class="title-row"><span class="brand-dot">RED</span><h1>小红书矩阵账号运营看板</h1></div><p>订单 · 佣金 · 成交 · 趋势 · 异常</p></div>
+      <div class="actions"><span class="live"><i></i> 每 5 分钟检查更新</span><button id="refresh" title="立即刷新">↻</button><button id="logout" title="退出">↪</button></div>
+    </header>
+    <section class="filters">
+      <div id="periods" class="tabs"></div>
+      <details class="channel-filter"><summary>渠道 <b id="channel-summary">全部 12 个</b></summary><div id="channel-menu" class="channel-menu"></div></details>
+      <div class="disabled-filter">推广位 <b>来源未提供</b></div>
+    </section>
+    <section id="status" class="status"></section>
+    <section id="kpis" class="kpis"></section>
+    <section class="primary-grid">
+      <article class="panel trend"><header><div><h2>每日趋势</h2><p id="trend-note"></p></div><div id="metric-tabs" class="metric-tabs"></div></header><div id="chart" class="chart"></div></article>
+      <article class="panel"><header><div><h2>渠道表现排名</h2><p id="ranking-note"></p></div></header><div id="ranking" class="ranking"></div></article>
+    </section>
+    <section class="secondary-grid">
+      <article class="panel"><header><div><h2>异常与变化</h2><p>按最近两个自然日自动识别</p></div></header><div id="alerts" class="alerts"></div></article>
+      <article class="panel"><header><div><h2>补充观察</h2><p>仅展示来源字段可支持的分析</p></div></header><div id="comparison"></div><div class="limits"><b>暂不可用</b><span>推广位排名 · 高峰下单时段 · 理论/动态预测</span><small>源站未提供推广位、小时级或足够长的稳定历史。</small></div></article>
+    </section>
+    <section class="panel details">
+      <header><div><h2>日期 × 渠道明细</h2><p>真实 0 保留为 0；未返回的记录不会补零</p></div><label class="search"><span>⌕</span><input id="search" placeholder="搜索渠道" /></label></header>
+      <div class="table-wrap"><table><thead><tr><th data-sort="stat_date">日期 ↓</th><th>渠道</th><th data-sort="orders">订单</th><th data-sort="commission">预估佣金</th><th data-sort="gmv">成交金额</th><th>佣金率</th><th>识别</th></tr></thead><tbody id="detail-body"></tbody></table><div id="empty-detail" class="empty" hidden>暂无记录</div></div>
+    </section>
+    <footer><div><b>数据口径</b><span>累计：源平台汇总</span><span>周期：源站逐日明细或已保存历史</span><span>缺失：暂无记录</span><span>0：仅保留源站真实 0</span></div><div id="sources"><b>数据来源</b></div></footer>
+  </main>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
