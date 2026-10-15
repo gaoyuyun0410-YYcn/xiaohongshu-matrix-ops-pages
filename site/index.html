@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#f5f7f8" />
   <title>小红书矩阵账号运营看板</title>
-  <link rel="stylesheet" href="./styles.css?v=20261015-1" />
+  <link rel="stylesheet" href="./styles.css?v=20261015-2" />
 </head>
 <body>
   <main id="login" class="login-page">
@@ -32,17 +32,17 @@
     <section class="filters">
       <div id="periods" class="tabs"></div>
       <details class="channel-filter"><summary>渠道 <b id="channel-summary">全部 12 个</b></summary><div id="channel-menu" class="channel-menu"></div></details>
-      <div class="disabled-filter">推广位 <b>来源未提供</b></div>
+      <details class="channel-filter promotion-filter"><summary>推广位 <b id="promotion-summary">全部</b></summary><div id="promotion-menu" class="channel-menu promotion-menu"></div></details>
     </section>
     <section id="status" class="status"></section>
     <section id="kpis" class="kpis"></section>
     <section class="primary-grid">
-      <article class="panel trend"><header><div><h2>每日趋势</h2><p id="trend-note"></p></div><div id="metric-tabs" class="metric-tabs"></div></header><div id="chart" class="chart"></div></article>
-      <article class="panel"><header><div><h2>渠道表现排名</h2><p id="ranking-note"></p></div></header><div id="ranking" class="ranking"></div></article>
+      <article class="panel trend"><header><div><h2>每日趋势</h2><p id="trend-note"></p></div><div class="panel-controls"><label class="select-control"><span>查看</span><select id="trend-channel"></select></label><div id="metric-tabs" class="metric-tabs"></div></div></header><div id="chart" class="chart"></div><div id="trend-values" class="trend-values"></div></article>
+      <article class="panel"><header><div><h2 id="ranking-title">表现排名</h2><p id="ranking-note"></p></div><div id="ranking-dimension" class="metric-tabs"><button data-dimension="channel">渠道</button><button data-dimension="promotion">推广位</button></div></header><div id="ranking" class="ranking"></div></article>
     </section>
     <section class="secondary-grid">
       <article class="panel"><header><div><h2>异常与变化</h2><p>按最近两个自然日自动识别</p></div></header><div id="alerts" class="alerts"></div></article>
-      <article class="panel"><header><div><h2>补充观察</h2><p>仅展示来源字段可支持的分析</p></div></header><div id="comparison"></div><div class="limits"><b>暂不可用</b><span>推广位排名 · 高峰下单时段 · 理论/动态预测</span><small>源站未提供推广位、小时级或足够长的稳定历史。</small></div></article>
+      <article class="panel"><header><div><h2>补充观察</h2><p>仅展示来源字段可支持的分析</p></div></header><div id="comparison"></div><div class="limits"><b>暂不可用</b><span>高峰下单时段 · 理论/动态预测</span><small>源站未提供小时级数据，且历史长度尚不足以形成稳定预测。</small></div></article>
     </section>
     <section class="panel details">
       <header><div><h2>日期 × 渠道明细</h2><p>真实 0 保留为 0；未返回的记录不会补零</p></div><label class="search"><span>⌕</span><input id="search" placeholder="搜索渠道" /></label></header>
@@ -50,6 +50,7 @@
     </section>
     <footer><div><b>数据口径</b><span>累计：源平台汇总</span><span>周期：源站逐日明细或已保存历史</span><span>缺失：暂无记录</span><span>0：仅保留源站真实 0</span></div><div id="sources"><b>数据来源</b></div></footer>
   </main>
-  <script type="module" src="./app.js"></script>
+  <script src="./data.enc.js"></script>
+  <script src="./app.js?v=20261015-2"></script>
 </body>
 </html>

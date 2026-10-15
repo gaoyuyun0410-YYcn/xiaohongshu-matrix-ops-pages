@@ -43,6 +43,7 @@ const config = process.env.CHANNEL_CONFIG
 if (!config?.accountId || !Array.isArray(config.channels) || !config.channels.length) throw new Error("Valid encrypted channel config is required");
 const ACCOUNT_ID = config.accountId;
 const CHANNELS = config.channels;
+const PROMOTIONS = Array.isArray(config.promotions) ? config.promotions : [];
 
 async function fetchPreviousPayload() {
   const url = process.env.PREVIOUS_DATA_URL;
@@ -108,13 +109,70 @@ async function fetchChannel([name, id, sourceUrl], fetchedAt) {
   }
 }
 
+async function fetchPromotion([name, id, sourceUrl, channelName], fetchedAt) {
+  const endpoint = new URL("https://alliance.yunzhanxinxi.com/promotion/statistics");
+  endpoint.searchParams.set("accountsid", ACCOUNT_ID);
+  endpoint.searchParams.set("promotionid", id);
+  try {
+    let response;
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      response = await fetch(endpoint, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(25_000) });
+      if (response.ok) break;
+      if (attempt < 3) await new Promise((resolveDelay) => setTimeout(resolveDelay, attempt * 1_500));
+    }
+    if (!response?.ok) throw new Error(`HTTP ${response?.status ?? "unknown"}`);
+    const payload = await response.json();
+    if (payload?.code !== 200 || !payload?.data) throw new Error(`source code ${payload?.code ?? "unknown"}`);
+    const sourceRows = Array.isArray(payload.data.statistics_list) ? payload.data.statistics_list : [];
+    const total = payload.data.statistics_total || {};
+    return {
+      promotion: {
+        name,
+        id,
+        sourceUrl,
+        channelName,
+        status: "ok",
+        error: null,
+        total: {
+          orders: Number(total.valid_num),
+          commission: Number(total.estimate_valid_amount),
+          gmv: Number(total.valid_amount),
+          orders30d: Number(total.days_valid_num),
+          commission30d: Number(total.days_estimate_valid_amount),
+          gmv30d: Number(total.days_valid_amount),
+        },
+        sourceRowCount: sourceRows.length,
+      },
+      rows: sourceRows.map((row) => ({
+        promotion_id: id,
+        promotion_name: name,
+        channel_name: channelName,
+        stat_date: row.statistics_date,
+        orders: Number(row.valid_num),
+        commission: Number(row.estimate_valid_amount),
+        gmv: Number(row.valid_amount),
+        observed_at: fetchedAt,
+      })),
+    };
+  } catch (error) {
+    return {
+      promotion: { name, id, sourceUrl, channelName, status: "error", error: error instanceof Error ? error.message : "unknown", total: null, sourceRowCount: 0 },
+      rows: [],
+    };
+  }
+}
+
 const fetchedAt = new Date().toISOString();
 const previousPayload = await fetchPreviousPayload();
 const results = [];
 for (let index = 0; index < CHANNELS.length; index += 3) {
   results.push(...await Promise.all(CHANNELS.slice(index, index + 3).map((channel) => fetchChannel(channel, fetchedAt))));
 }
-const allSourcesOk = results.every((result) => result.channel.status === "ok");
+const promotionResults = [];
+for (let index = 0; index < PROMOTIONS.length; index += 6) {
+  promotionResults.push(...await Promise.all(PROMOTIONS.slice(index, index + 6).map((promotion) => fetchPromotion(promotion, fetchedAt))));
+}
+const allSourcesOk = results.every((result) => result.channel.status === "ok") && promotionResults.every((result) => result.promotion.status === "ok");
 const outputPath = process.env.OUTPUT_PATH ? resolve(process.env.OUTPUT_PATH) : resolve(dirname(fileURLToPath(import.meta.url)), "..", "data.enc.json");
 await mkdir(dirname(outputPath), { recursive: true });
 if (!allSourcesOk && previousPayload) {
@@ -126,15 +184,20 @@ if (!allSourcesOk && previousPayload) {
 const rowsByKey = new Map((previousPayload?.rows || []).map((row) => [`${row.channel_id}:${row.stat_date}`, row]));
 for (const row of results.flatMap((result) => result.rows)) rowsByKey.set(`${row.channel_id}:${row.stat_date}`, row);
 const rows = [...rowsByKey.values()].sort((a, b) => a.stat_date.localeCompare(b.stat_date) || a.channel_name.localeCompare(b.channel_name, "zh-CN"));
+const promotionRowsByKey = new Map((previousPayload?.promotionRows || []).map((row) => [`${row.promotion_id}:${row.stat_date}`, row]));
+for (const row of promotionResults.flatMap((result) => result.rows)) promotionRowsByKey.set(`${row.promotion_id}:${row.stat_date}`, row);
+const promotionRows = [...promotionRowsByKey.values()].sort((a, b) => a.stat_date.localeCompare(b.stat_date) || a.promotion_name.localeCompare(b.promotion_name, "zh-CN"));
 const payload = {
   fetchedAt,
   refreshSeconds: 300,
-  sourceWindow: "源站近30天逐日明细 + GitHub 已保存历史 + 平台累计汇总",
+  sourceWindow: "渠道与推广位近30天逐日明细 + GitHub 已保存历史 + 平台累计汇总",
   historyStart: rows[0]?.stat_date || null,
   channels: results.map((result) => result.channel),
   rows,
+  promotions: promotionResults.map((result) => result.promotion),
+  promotionRows,
 };
 
 if (!results.some((result) => result.channel.status === "ok")) throw new Error("All upstream sources failed and no previous deployment is available");
 await writeFile(outputPath, `${JSON.stringify(encrypt(payload))}\n`, { mode: 0o600 });
-console.log(JSON.stringify({ outputPath, fetchedAt, channels: payload.channels.length, ok: payload.channels.filter((channel) => channel.status === "ok").length, rows: rows.length }));
+console.log(JSON.stringify({ outputPath, fetchedAt, channels: payload.channels.length, promotions: payload.promotions.length, ok: payload.channels.filter((channel) => channel.status === "ok").length + payload.promotions.filter((promotion) => promotion.status === "ok").length, rows: rows.length, promotionRows: promotionRows.length }));
