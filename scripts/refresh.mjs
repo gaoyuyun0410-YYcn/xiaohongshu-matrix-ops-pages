@@ -190,6 +190,7 @@ const promotionRows = [...promotionRowsByKey.values()].sort((a, b) => a.stat_dat
 const payload = {
   fetchedAt,
   refreshSeconds: 300,
+  accountId: ACCOUNT_ID,
   sourceWindow: "渠道与推广位近30天逐日明细 + GitHub 已保存历史 + 平台累计汇总",
   historyStart: rows[0]?.stat_date || null,
   channels: results.map((result) => result.channel),

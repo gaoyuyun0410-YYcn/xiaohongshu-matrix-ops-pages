@@ -5,7 +5,8 @@ on:
     branches: [main]
   workflow_dispatch:
   schedule:
-    - cron: "*/5 * * * *"
+    # Avoid the busiest minute boundaries; browser-side refresh covers the five-minute live view.
+    - cron: "2-59/5 * * * *"
 
 permissions:
   contents: read

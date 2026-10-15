@@ -49,6 +49,99 @@ const formatMetric = (value, metric = state.metric) => {
   return metric === "orders" ? `${num.format(value)} 单` : money.format(value);
 };
 
+function sourceTotal(total = {}) {
+  return {
+    orders: Number(total.valid_num),
+    commission: Number(total.estimate_valid_amount),
+    gmv: Number(total.valid_amount),
+    orders30d: Number(total.days_valid_num),
+    commission30d: Number(total.days_estimate_valid_amount),
+    gmv30d: Number(total.days_valid_amount),
+  };
+}
+
+async function fetchUpstream(kind, item, accountId, fetchedAt) {
+  const endpoint = new URL("https://alliance.yunzhanxinxi.com/promotion/statistics");
+  endpoint.searchParams.set("accountsid", accountId);
+  endpoint.searchParams.set(kind === "channel" ? "channelid" : "promotionid", item.id);
+  try {
+    const response = await fetch(endpoint, {
+      cache: "no-store",
+      headers: { accept: "application/json" },
+      signal: AbortSignal.timeout(25_000),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = await response.json();
+    if (payload?.code !== 200 || !payload?.data) throw new Error(`source code ${payload?.code ?? "unknown"}`);
+    const sourceRows = Array.isArray(payload.data.statistics_list) ? payload.data.statistics_list : [];
+    const updatedItem = {
+      ...item,
+      status: "ok",
+      error: null,
+      total: sourceTotal(payload.data.statistics_total),
+      sourceRowCount: sourceRows.length,
+    };
+    const rows = sourceRows.map((row) => kind === "channel" ? {
+      channel_id: item.id,
+      channel_name: item.name,
+      stat_date: row.statistics_date,
+      orders: Number(row.valid_num),
+      commission: Number(row.estimate_valid_amount),
+      gmv: Number(row.valid_amount),
+      observed_at: fetchedAt,
+    } : {
+      promotion_id: item.id,
+      promotion_name: item.name,
+      channel_name: item.channelName,
+      stat_date: row.statistics_date,
+      orders: Number(row.valid_num),
+      commission: Number(row.estimate_valid_amount),
+      gmv: Number(row.valid_amount),
+      observed_at: fetchedAt,
+    });
+    return { ok: true, item: updatedItem, rows };
+  } catch (error) {
+    return { ok: false, item, rows: [], error: error instanceof Error ? error.message : "unknown" };
+  }
+}
+
+async function fetchInBatches(kind, items, accountId, fetchedAt, batchSize) {
+  const results = [];
+  for (let index = 0; index < items.length; index += batchSize) {
+    results.push(...await Promise.all(items.slice(index, index + batchSize).map((item) => fetchUpstream(kind, item, accountId, fetchedAt))));
+  }
+  return results;
+}
+
+function mergeHistory(previousRows, incomingRows, keyFor) {
+  const rowsByKey = new Map(previousRows.map((row) => [keyFor(row), row]));
+  for (const row of incomingRows) rowsByKey.set(keyFor(row), row);
+  return [...rowsByKey.values()].sort((left, right) => left.stat_date.localeCompare(right.stat_date));
+}
+
+async function fetchLiveData(data) {
+  if (!data.accountId) throw new Error("当前数据版本不支持浏览器实时刷新");
+  const fetchedAt = new Date().toISOString();
+  const channelResults = await fetchInBatches("channel", data.channels, data.accountId, fetchedAt, 3);
+  const promotionResults = await fetchInBatches("promotion", data.promotions, data.accountId, fetchedAt, 6);
+  const successfulChannels = channelResults.filter((result) => result.ok);
+  if (!successfulChannels.length) throw new Error("实时数据源暂时不可用");
+  const channelById = new Map(channelResults.filter((result) => result.ok).map((result) => [result.item.id, result.item]));
+  const promotionById = new Map(promotionResults.filter((result) => result.ok).map((result) => [result.item.id, result.item]));
+  const rows = mergeHistory(data.rows, successfulChannels.flatMap((result) => result.rows), (row) => `${row.channel_id}:${row.stat_date}`);
+  const promotionRows = mergeHistory(data.promotionRows, promotionResults.filter((result) => result.ok).flatMap((result) => result.rows), (row) => `${row.promotion_id}:${row.stat_date}`);
+  return normalizeData({
+    ...data,
+    fetchedAt,
+    rows,
+    promotionRows,
+    channels: data.channels.map((channel) => channelById.get(channel.id) || channel),
+    promotions: data.promotions.map((promotion) => promotionById.get(promotion.id) || promotion),
+    liveSource: true,
+    liveFailures: channelResults.filter((result) => !result.ok).length + promotionResults.filter((result) => !result.ok).length,
+  });
+}
+
 async function decryptEnvelope(envelope, password) {
   const material = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveKey"]);
   const key = await crypto.subtle.deriveKey(
@@ -83,6 +176,7 @@ async function login(event) {
     $("#dashboard").hidden = false;
     initialize();
     render();
+    refresh({ silent: true });
   } catch (loginError) {
     error.textContent = loginError.message.includes("decrypt") || loginError.name === "OperationError"
       ? "密码不正确，或数据正在更新，请稍后重试。"
@@ -557,19 +651,39 @@ function renderTable(current = context()) {
   });
 }
 
-async function refresh() {
+async function refresh({ silent = false } = {}) {
+  if (!state.password || state.refreshing) return;
+  state.refreshing = true;
+  const button = $("#refresh");
+  button.disabled = true;
+  button.textContent = "…";
+  $(".live").innerHTML = "<i></i> 正在获取源数据";
   try {
-    const next = normalizeData(await fetchData(state.password));
+    const next = await fetchLiveData(state.data);
     state.data = next;
     state.selectedChannels = new Set([...state.selectedChannels].filter((id) => next.channels.some((channel) => channel.id === id)));
     state.selectedPromotions = new Set([...state.selectedPromotions].filter((id) => next.promotions.some((promotion) => promotion.id === id)));
     render();
-  } catch {
-    $("#dashboard").hidden = true;
-    $("#login").hidden = false;
-    $("#login-error").textContent = "密码或数据版本已更新，请重新登录。";
-    $("#login-error").hidden = false;
-    state.password = "";
+    const time = new Date(next.fetchedAt).toLocaleTimeString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false, hour: "2-digit", minute: "2-digit" });
+    $(".live").innerHTML = `<i></i> ${next.liveFailures ? `已更新，${next.liveFailures} 个来源暂不可用` : `实时更新于 ${time}`}`;
+  } catch (liveError) {
+    try {
+      const snapshot = normalizeData(await fetchData(state.password));
+      if (snapshot.fetchedAt > state.data.fetchedAt) state.data = snapshot;
+      render();
+      $(".live").innerHTML = `<i></i> 实时连接失败，显示最近快照`;
+    } catch {
+      $("#dashboard").hidden = true;
+      $("#login").hidden = false;
+      $("#login-error").textContent = "密码或数据版本已更新，请重新登录。";
+      $("#login-error").hidden = false;
+      state.password = "";
+    }
+    if (!silent) console.warn(liveError);
+  } finally {
+    state.refreshing = false;
+    button.disabled = false;
+    button.textContent = "↻";
   }
 }
 
@@ -579,7 +693,7 @@ $("#show-password").onclick = () => {
   input.type = input.type === "password" ? "text" : "password";
   $("#show-password").textContent = input.type === "password" ? "显示" : "隐藏";
 };
-$("#refresh").onclick = refresh;
+$("#refresh").onclick = () => refresh();
 $("#logout").onclick = () => {
   state.password = "";
   state.data = null;
