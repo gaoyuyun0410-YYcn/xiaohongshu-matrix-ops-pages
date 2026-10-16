@@ -13,6 +13,10 @@ const metricNames = { orders: "订单", gmv: "成交", commission: "佣金" };
 const periodNames = Object.fromEntries(periods.map((period) => [period.k, period.l]));
 const money = new Intl.NumberFormat("zh-CN", { style: "currency", currency: "CNY", maximumFractionDigits: 2 });
 const num = new Intl.NumberFormat("zh-CN");
+const REMEMBERED_LOGIN_KEY = "xhs-matrix-login-v1";
+const DEVICE_DB_NAME = "xhs-matrix-device-v1";
+const DEVICE_KEY_ID = "dashboard-login";
+const REMEMBER_MS = 30 * 24 * 60 * 60 * 1000;
 let state = {
   data: null,
   password: "",
@@ -28,6 +32,7 @@ let state = {
 };
 
 const b64 = (value) => Uint8Array.from(atob(value), (character) => character.charCodeAt(0));
+const toB64 = (value) => btoa(String.fromCharCode(...new Uint8Array(value)));
 const iso = (date) => date.toISOString().slice(0, 10);
 const parseDate = (value) => new Date(`${value}T00:00:00Z`);
 const addDays = (value, days) => {
@@ -156,32 +161,117 @@ async function decryptEnvelope(envelope, password) {
 }
 
 async function fetchData(password) {
-  if (window.__DASHBOARD_ENVELOPE__) return decryptEnvelope(window.__DASHBOARD_ENVELOPE__, password);
+  if (location.protocol === "file:" && window.__DASHBOARD_ENVELOPE__) return decryptEnvelope(window.__DASHBOARD_ENVELOPE__, password);
   const response = await fetch(`./data.enc.json?t=${Date.now()}`, { cache: "no-store" });
   if (!response.ok) throw new Error("数据文件尚未生成");
   return decryptEnvelope(await response.json(), password);
 }
 
+function openDeviceDb() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DEVICE_DB_NAME, 1);
+    request.onupgradeneeded = () => request.result.createObjectStore("keys");
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function getDeviceKey() {
+  const db = await openDeviceDb();
+  const existing = await new Promise((resolve, reject) => {
+    const request = db.transaction("keys", "readonly").objectStore("keys").get(DEVICE_KEY_ID);
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+  if (existing) {
+    db.close();
+    return existing;
+  }
+  const key = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+  await new Promise((resolve, reject) => {
+    const transaction = db.transaction("keys", "readwrite");
+    transaction.objectStore("keys").put(key, DEVICE_KEY_ID);
+    transaction.oncomplete = resolve;
+    transaction.onerror = () => reject(transaction.error);
+  });
+  db.close();
+  return key;
+}
+
+async function rememberPassword(password) {
+  if (location.protocol === "file:") return;
+  try {
+    const key = await getDeviceKey();
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, new TextEncoder().encode(password));
+    localStorage.setItem(REMEMBERED_LOGIN_KEY, JSON.stringify({
+      iv: toB64(iv),
+      ciphertext: toB64(ciphertext),
+      expiresAt: Date.now() + REMEMBER_MS,
+    }));
+  } catch {
+    forgetPassword();
+  }
+}
+
+function forgetPassword() {
+  localStorage.removeItem(REMEMBERED_LOGIN_KEY);
+}
+
+async function readRememberedPassword() {
+  let saved;
+  try {
+    saved = JSON.parse(localStorage.getItem(REMEMBERED_LOGIN_KEY) || "null");
+  } catch {
+    forgetPassword();
+    return null;
+  }
+  if (!saved || !saved.iv || !saved.ciphertext || Number(saved.expiresAt) <= Date.now()) {
+    forgetPassword();
+    return null;
+  }
+  try {
+    const key = await getDeviceKey();
+    const clear = await crypto.subtle.decrypt({ name: "AES-GCM", iv: b64(saved.iv) }, key, b64(saved.ciphertext));
+    return new TextDecoder().decode(clear);
+  } catch {
+    forgetPassword();
+    return null;
+  }
+}
+
+async function unlockDashboard(password, { remember = false } = {}) {
+  const error = $("#login-error");
+  error.hidden = true;
+  state.data = normalizeData(await fetchData(password));
+  state.password = password;
+  state.selectedChannels = new Set(state.data.channels.map((channel) => channel.id));
+  state.selectedPromotions = new Set(state.data.promotions.map((promotion) => promotion.id));
+  if (remember) await rememberPassword(password);
+  else forgetPassword();
+  $("#login").hidden = true;
+  $("#dashboard").hidden = false;
+  initialize();
+  render();
+  refresh({ silent: true });
+}
+
 async function login(event) {
   event.preventDefault();
   const error = $("#login-error");
-  error.hidden = true;
-  const password = $("#password").value;
+  const button = $("#login-form .primary");
+  button.disabled = true;
+  button.textContent = "验证中…";
   try {
-    state.data = normalizeData(await fetchData(password));
-    state.password = password;
-    state.selectedChannels = new Set(state.data.channels.map((channel) => channel.id));
-    state.selectedPromotions = new Set(state.data.promotions.map((promotion) => promotion.id));
-    $("#login").hidden = true;
-    $("#dashboard").hidden = false;
-    initialize();
-    render();
-    refresh({ silent: true });
+    await unlockDashboard($("#password").value, { remember: $("#remember-login").checked });
   } catch (loginError) {
     error.textContent = loginError.message.includes("decrypt") || loginError.name === "OperationError"
       ? "密码不正确，或数据正在更新，请稍后重试。"
       : loginError.message;
     error.hidden = false;
+  } finally {
+    button.disabled = false;
+    button.textContent = "进入看板";
   }
 }
 
@@ -289,6 +379,14 @@ function initialize() {
     state.trendChannel = event.target.value;
     renderChart(context());
   };
+  $("#channel-trends").onclick = (event) => {
+    const card = event.target.closest("[data-channel]");
+    if (!card) return;
+    state.trendChannel = card.dataset.channel;
+    syncTrendOptions();
+    renderChart(context());
+    $(".trend").scrollIntoView({ behavior: "smooth", block: "center" });
+  };
   $("#search").oninput = (event) => {
     state.query = event.target.value;
     renderTable();
@@ -371,10 +469,59 @@ function render() {
   renderStatus(current);
   renderKpis(current);
   renderChart(current);
+  renderChannelTrends(current);
   renderRanking(current);
   renderAlerts(current);
   renderComparison(current);
   renderTable(current);
+}
+
+function miniTrendSvg(daily, metric, label) {
+  const width = 320;
+  const height = 92;
+  const padding = { left: 4, right: 4, top: 10, bottom: 8 };
+  const available = daily.map((day, index) => ({ index, value: day[metric] })).filter((item) => item.value != null);
+  if (!available.length) return '<div class="mini-empty">暂无记录</div>';
+  if (daily.length === 1) {
+    const value = available[0].value;
+    const maximum = Math.max(1, value);
+    const barHeight = Math.max(3, (height - padding.top - padding.bottom) * value / maximum);
+    return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(label)}"><rect class="mini-bar" x="126" y="${height - padding.bottom - barHeight}" width="68" height="${barHeight}" rx="7"/></svg>`;
+  }
+  const maximum = Math.max(1, ...available.map((item) => item.value));
+  const x = (index) => padding.left + (width - padding.left - padding.right) * index / (daily.length - 1);
+  const y = (value) => padding.top + (height - padding.top - padding.bottom) * (1 - value / maximum);
+  const segments = [];
+  let segment = [];
+  daily.forEach((day, index) => {
+    if (day[metric] == null) {
+      if (segment.length) segments.push(segment);
+      segment = [];
+    } else segment.push({ index, value: day[metric] });
+  });
+  if (segment.length) segments.push(segment);
+  const lines = segments.map((items) => items.length > 1 ? `<polyline points="${items.map((item) => `${x(item.index)},${y(item.value)}`).join(" ")}"/>` : "").join("");
+  const points = segments.flat().map((item) => `<circle cx="${x(item.index)}" cy="${y(item.value)}" r="2.6"/>`).join("");
+  return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(label)}">${lines}${points}</svg>`;
+}
+
+function renderChannelTrends(current) {
+  const channels = current.data.channels.filter((channel) => state.selectedChannels.has(channel.id));
+  $("#channel-trends-note").textContent = `${periodNames[state.period]} · 每张卡片显示每日${metricNames[state.metric]}，点击可在上方放大查看`;
+  $("#channel-trends").innerHTML = channels.length ? channels.map((channel) => {
+    const rows = current.analysisRows.filter((row) => row.channel_id === channel.id && row.stat_date >= current.start && row.stat_date <= current.end);
+    const daily = dailySeries(rows, current.start, current.end);
+    const available = daily.filter((day) => day[state.metric] != null);
+    const total = available.length ? sum(available, state.metric) : null;
+    const latest = [...available].reverse()[0];
+    const latestLabel = latest ? `${latest.date.slice(5).replace("-", "/")} ${formatMetric(latest[state.metric])}` : "暂无逐日记录";
+    return `<button class="channel-trend-card" type="button" data-channel="${channel.id}" aria-label="放大查看${escapeHtml(channel.name)}趋势">
+      <span class="channel-trend-head"><b>${escapeHtml(channel.name)}</b><strong>${formatMetric(total)}</strong></span>
+      <span class="channel-trend-latest">最新：${latestLabel}</span>
+      <span class="mini-chart">${miniTrendSvg(daily, state.metric, `${channel.name}${metricNames[state.metric]}趋势`)}</span>
+      <span class="channel-trend-range"><i>${current.start.slice(5).replace("-", "/")}</i><i>${current.end.slice(5).replace("-", "/")}</i></span>
+    </button>`;
+  }).join("") : '<div class="empty">请先选择渠道</div>';
 }
 
 function renderStatus(current) {
@@ -678,6 +825,7 @@ async function refresh({ silent = false } = {}) {
       $("#login-error").textContent = "密码或数据版本已更新，请重新登录。";
       $("#login-error").hidden = false;
       state.password = "";
+      forgetPassword();
     }
     if (!silent) console.warn(liveError);
   } finally {
@@ -695,6 +843,7 @@ $("#show-password").onclick = () => {
 };
 $("#refresh").onclick = () => refresh();
 $("#logout").onclick = () => {
+  forgetPassword();
   state.password = "";
   state.data = null;
   $("#password").value = "";
@@ -703,3 +852,24 @@ $("#logout").onclick = () => {
 };
 setInterval(() => { if (state.password) refresh(); }, 300_000);
 if (location.protocol === "file:") $(".live").innerHTML = "<i></i> 本地加密快照";
+
+async function restoreLogin() {
+  if (location.protocol === "file:") return;
+  const password = await readRememberedPassword();
+  if (!password) return;
+  const button = $("#login-form .primary");
+  button.disabled = true;
+  button.textContent = "正在恢复登录…";
+  try {
+    await unlockDashboard(password, { remember: true });
+  } catch {
+    forgetPassword();
+    $("#login-error").textContent = "免登录状态已失效，请重新输入密码。";
+    $("#login-error").hidden = false;
+  } finally {
+    button.disabled = false;
+    button.textContent = "进入看板";
+  }
+}
+
+restoreLogin();

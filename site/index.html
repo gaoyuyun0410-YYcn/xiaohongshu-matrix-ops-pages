@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#f5f7f8" />
   <title>小红书矩阵账号运营看板</title>
-  <link rel="stylesheet" href="./styles.css?v=20261015-3" />
+  <link rel="stylesheet" href="./styles.css?v=20261016-1" />
 </head>
 <body>
   <main id="login" class="login-page">
@@ -17,10 +17,11 @@
       <form id="login-form">
         <label for="password">访问密码</label>
         <div class="password-row"><input id="password" type="password" autocomplete="current-password" required placeholder="请输入密码" /><button type="button" id="show-password" aria-label="显示密码">显示</button></div>
+        <label class="remember-row"><input id="remember-login" type="checkbox" checked /><span>在本设备保持登录 30 天</span></label>
         <p id="login-error" class="error" hidden></p>
         <button class="primary" type="submit">进入看板</button>
       </form>
-      <small>数据采用 AES-256-GCM 加密；更换密码后，旧密码会在下一次数据更新时失效。</small>
+      <small>登录凭据使用本设备密钥加密保存；主动退出或更换密码后，免登录状态会失效。</small>
     </section>
   </main>
 
@@ -40,6 +41,10 @@
       <article class="panel trend"><header><div><h2>每日趋势</h2><p id="trend-note"></p></div><div class="panel-controls"><label class="select-control"><span>查看</span><select id="trend-channel"></select></label><div id="metric-tabs" class="metric-tabs"></div></div></header><div id="chart" class="chart"></div><div id="trend-values" class="trend-values"></div></article>
       <article class="panel"><header><div><h2 id="ranking-title">表现排名</h2><p id="ranking-note"></p></div><div id="ranking-dimension" class="metric-tabs"><button data-dimension="channel">渠道</button><button data-dimension="promotion">推广位</button></div></header><div id="ranking" class="ranking"></div></article>
     </section>
+    <section class="panel channel-trends-panel">
+      <header><div><h2>各渠道每日趋势</h2><p id="channel-trends-note">当前筛选渠道的逐日表现</p></div></header>
+      <div id="channel-trends" class="channel-trend-grid"></div>
+    </section>
     <section class="secondary-grid">
       <article class="panel"><header><div><h2>异常与变化</h2><p>按最近两个自然日自动识别</p></div></header><div id="alerts" class="alerts"></div></article>
       <article class="panel"><header><div><h2>补充观察</h2><p>仅展示来源字段可支持的分析</p></div></header><div id="comparison"></div><div class="limits"><b>暂不可用</b><span>高峰下单时段 · 理论/动态预测</span><small>源站未提供小时级数据，且历史长度尚不足以形成稳定预测。</small></div></article>
@@ -51,6 +56,6 @@
     <footer><div><b>数据口径</b><span>累计：源平台汇总</span><span>周期：源站逐日明细或已保存历史</span><span>缺失：暂无记录</span><span>0：仅保留源站真实 0</span></div><div id="sources"><b>数据来源</b></div></footer>
   </main>
   <script src="./data.enc.js"></script>
-  <script src="./app.js?v=20261015-3"></script>
+  <script src="./app.js?v=20261016-1"></script>
 </body>
 </html>
