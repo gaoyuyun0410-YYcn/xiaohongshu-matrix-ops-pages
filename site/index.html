@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#f5f7f8" />
   <title>小红书矩阵账号运营看板</title>
-  <link rel="stylesheet" href="./styles.css?v=20261016-1" />
+  <link rel="stylesheet" href="./styles.css?v=20261017-1" />
 </head>
 <body>
   <main id="login" class="login-page">
@@ -45,6 +45,32 @@
       <header><div><h2>各渠道每日趋势</h2><p id="channel-trends-note">当前筛选渠道的逐日表现</p></div></header>
       <div id="channel-trends" class="channel-trend-grid"></div>
     </section>
+    <section class="panel capability-panel">
+      <header>
+        <div><h2>成员能力矩阵</h2><p id="capability-note">用真实业务指标横向比较成员，并识别增长与波动</p></div>
+        <div id="capability-sort" class="metric-tabs capability-sort">
+          <button data-capability-sort="orders">有效订单</button>
+          <button data-capability-sort="commissionRate">佣金率</button>
+          <button data-capability-sort="activeRate">出单活跃率</button>
+          <button data-capability-sort="growth">增长</button>
+          <button data-capability-sort="volatility">波动</button>
+        </div>
+      </header>
+      <div id="capability-highlights" class="capability-highlights"></div>
+      <div class="capability-table-wrap">
+        <table class="capability-table">
+          <thead><tr><th>成员</th><th>趋势</th><th>有效订单</th><th>预估佣金</th><th>成交金额</th><th>佣金率</th><th>出单活跃率</th><th>较前同周期</th><th>波动系数</th><th>近况</th></tr></thead>
+          <tbody id="capability-body"></tbody>
+        </table>
+        <div id="empty-capability" class="empty" hidden>当前筛选范围暂无成员记录</div>
+      </div>
+      <div class="capability-definitions">
+        <span><b>有效订单</b>＝源站 valid_num；源站未提供独立“核销”字段</span>
+        <span><b>佣金率</b>＝预估佣金 ÷ 有效成交金额</span>
+        <span><b>出单活跃率</b>＝有订单的返回天数 ÷ 已返回明细天数</span>
+        <span><b>波动系数</b>＝每日订单标准差 ÷ 日均订单，数值越低越稳定</span>
+      </div>
+    </section>
     <section class="secondary-grid">
       <article class="panel"><header><div><h2>异常与变化</h2><p>按最近两个自然日自动识别</p></div></header><div id="alerts" class="alerts"></div></article>
       <article class="panel"><header><div><h2>补充观察</h2><p>仅展示来源字段可支持的分析</p></div></header><div id="comparison"></div><div class="limits"><b>暂不可用</b><span>高峰下单时段 · 理论/动态预测</span><small>源站未提供小时级数据，且历史长度尚不足以形成稳定预测。</small></div></article>
@@ -56,6 +82,6 @@
     <footer><div><b>数据口径</b><span>累计：源平台汇总</span><span>周期：源站逐日明细或已保存历史</span><span>缺失：暂无记录</span><span>0：仅保留源站真实 0</span></div><div id="sources"><b>数据来源</b></div></footer>
   </main>
   <script src="./data.enc.js"></script>
-  <script src="./app.js?v=20261016-1"></script>
+  <script src="./app.js?v=20261017-1"></script>
 </body>
 </html>

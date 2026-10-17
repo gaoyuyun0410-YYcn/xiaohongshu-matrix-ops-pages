@@ -26,6 +26,8 @@ let state = {
   selectedPromotions: new Set(),
   trendChannel: "all",
   rankingDimension: "channel",
+  capabilitySort: "orders",
+  capabilityDesc: true,
   query: "",
   sort: "stat_date",
   desc: true,
@@ -339,6 +341,17 @@ function initialize() {
       syncActiveControls();
     }
   };
+  $("#capability-sort").onclick = (event) => {
+    const field = event.target.dataset.capabilitySort;
+    if (!field) return;
+    if (state.capabilitySort === field) state.capabilityDesc = !state.capabilityDesc;
+    else {
+      state.capabilitySort = field;
+      state.capabilityDesc = field !== "volatility";
+    }
+    renderCapability(context());
+    syncActiveControls();
+  };
   $("#channel-menu").onclick = (event) => {
     if (event.target.dataset.all) {
       state.selectedChannels = new Set(state.data.channels.map((channel) => channel.id));
@@ -383,6 +396,14 @@ function initialize() {
     const card = event.target.closest("[data-channel]");
     if (!card) return;
     state.trendChannel = card.dataset.channel;
+    syncTrendOptions();
+    renderChart(context());
+    $(".trend").scrollIntoView({ behavior: "smooth", block: "center" });
+  };
+  $("#capability-body").onclick = (event) => {
+    const row = event.target.closest("[data-channel]");
+    if (!row) return;
+    state.trendChannel = row.dataset.channel;
     syncTrendOptions();
     renderChart(context());
     $(".trend").scrollIntoView({ behavior: "smooth", block: "center" });
@@ -458,6 +479,12 @@ function syncActiveControls() {
   $$("#periods button").forEach((button) => button.classList.toggle("active", button.dataset.period === state.period));
   $$("#metric-tabs button").forEach((button) => button.classList.toggle("active", button.dataset.metric === state.metric));
   $$("#ranking-dimension button").forEach((button) => button.classList.toggle("active", button.dataset.dimension === state.rankingDimension));
+  $$("#capability-sort button").forEach((button) => {
+    const active = button.dataset.capabilitySort === state.capabilitySort;
+    button.classList.toggle("active", active);
+    const label = button.textContent.replace(/[↑↓]\s*$/, "");
+    button.textContent = `${label}${active ? (state.capabilityDesc ? " ↓" : " ↑") : ""}`;
+  });
 }
 
 function render() {
@@ -470,10 +497,112 @@ function render() {
   renderKpis(current);
   renderChart(current);
   renderChannelTrends(current);
+  renderCapability(current);
   renderRanking(current);
   renderAlerts(current);
   renderComparison(current);
   renderTable(current);
+}
+
+function abilityRows(current) {
+  const priorEnd = addDays(current.start, -1);
+  const priorStart = addDays(priorEnd, -(current.days - 1));
+  return current.data.channels.filter((channel) => state.selectedChannels.has(channel.id)).map((channel) => {
+    const rows = current.analysisRows
+      .filter((row) => row.channel_id === channel.id && row.stat_date >= current.start && row.stat_date <= current.end)
+      .sort((left, right) => left.stat_date.localeCompare(right.stat_date));
+    const priorRows = state.period === "all" ? [] : current.analysisRows
+      .filter((row) => row.channel_id === channel.id && row.stat_date >= priorStart && row.stat_date <= priorEnd);
+    const orders = rows.length ? sum(rows, "orders") : null;
+    const commission = rows.length ? sum(rows, "commission") : null;
+    const gmv = rows.length ? sum(rows, "gmv") : null;
+    const commissionRate = gmv > 0 ? commission / gmv : null;
+    const activeRate = rows.length ? rows.filter((row) => Number(row.orders) > 0).length / rows.length : null;
+    const mean = rows.length ? orders / rows.length : null;
+    const variance = rows.length >= 3 && mean > 0
+      ? rows.reduce((total, row) => total + (Number(row.orders) - mean) ** 2, 0) / rows.length
+      : null;
+    const volatility = variance == null ? null : Math.sqrt(variance) / mean;
+    const comparable = state.period !== "all" && rows.length === current.days && priorRows.length === current.days;
+    const priorOrders = comparable ? sum(priorRows, "orders") : null;
+    const growth = comparable && priorOrders > 0 ? (orders - priorOrders) / priorOrders : null;
+    const growthStatus = comparable && priorOrders === 0 && orders > 0 ? "new" : comparable && priorOrders === 0 ? "flat-zero" : null;
+    const latest = rows.at(-1);
+    const previous = rows.at(-2);
+    let recent = { label: "样本不足", tone: "muted" };
+    if (latest && previous && latest.stat_date === addDays(previous.stat_date, 1)) {
+      if (previous.orders === 0 && latest.orders > 0) recent = { label: "新增出单", tone: "up" };
+      else if (previous.orders > 0) {
+        const change = (latest.orders - previous.orders) / previous.orders;
+        recent = { label: `${change >= 0 ? "+" : ""}${(change * 100).toFixed(0)}%`, tone: change > 0 ? "up" : change < 0 ? "down" : "muted" };
+      } else recent = { label: "连续 0 单", tone: "muted" };
+    }
+    return { channel, rows, orders, commission, gmv, commissionRate, activeRate, growth, growthStatus, volatility, recent };
+  });
+}
+
+function percentOrMissing(value, digits = 1, missing = "暂无记录") {
+  return value == null ? missing : `${(value * 100).toFixed(digits)}%`;
+}
+
+function growthLabel(item) {
+  if (item.growthStatus === "new") return '<span class="signal up">新增出单</span>';
+  if (item.growthStatus === "flat-zero") return '<span class="signal muted">持平 0 单</span>';
+  if (item.growth == null) return '<span class="signal missing">暂无可比</span>';
+  return `<span class="signal ${item.growth > 0 ? "up" : item.growth < 0 ? "down" : "muted"}">${item.growth > 0 ? "+" : ""}${(item.growth * 100).toFixed(1)}%</span>`;
+}
+
+function renderCapability(current) {
+  const items = abilityRows(current);
+  const available = items.filter((item) => item.rows.length);
+  const direction = state.capabilityDesc ? -1 : 1;
+  items.sort((left, right) => {
+    const leftValue = left[state.capabilitySort];
+    const rightValue = right[state.capabilitySort];
+    if (leftValue == null && rightValue == null) return left.channel.name.localeCompare(right.channel.name, "zh-CN");
+    if (leftValue == null) return 1;
+    if (rightValue == null) return -1;
+    return (leftValue - rightValue) * direction;
+  });
+
+  const maxBy = (field, filter = () => true) => available.filter(filter).sort((a, b) => (b[field] ?? -Infinity) - (a[field] ?? -Infinity))[0];
+  const minBy = (field, filter = () => true) => available.filter(filter).sort((a, b) => (a[field] ?? Infinity) - (b[field] ?? Infinity))[0];
+  const orderLeader = maxBy("orders");
+  const rateLeader = maxBy("commissionRate", (item) => item.commissionRate != null);
+  const activeLeader = maxBy("activeRate", (item) => item.activeRate != null);
+  const growthLeader = maxBy("growth", (item) => item.growth != null || item.growthStatus === "new");
+  const mostVolatile = maxBy("volatility", (item) => item.volatility != null);
+  const mostStable = minBy("volatility", (item) => item.volatility != null && item.orders > 0);
+  const scope = state.period === "all" ? `${current.start} 至 ${current.end} 的本系统已保存历史` : `${periodNames[state.period]} · ${current.start} 至 ${current.end}`;
+  $("#capability-note").textContent = `${scope}；点击成员行可在上方查看大图趋势`;
+
+  const highlight = (label, item, value, tone = "") => `<div class="capability-highlight ${tone}"><span>${label}</span><b>${item ? escapeHtml(item.channel.name) : "暂无记录"}</b><small>${item ? value(item) : "当前样本不足"}</small></div>`;
+  $("#capability-highlights").innerHTML = [
+    highlight("有效订单领先", orderLeader, (item) => `${num.format(item.orders)} 单`),
+    highlight("佣金率领先", rateLeader, (item) => percentOrMissing(item.commissionRate, 2)),
+    highlight("出单最持续", activeLeader, (item) => percentOrMissing(item.activeRate)),
+    highlight("增长最快", growthLeader, (item) => item.growthStatus === "new" ? "前期 0 单，本期新增" : `${item.growth > 0 ? "+" : ""}${(item.growth * 100).toFixed(1)}%`, "positive"),
+    highlight("相对最稳定", mostStable, (item) => `波动系数 ${item.volatility.toFixed(2)}`),
+    highlight("相对波动最大", mostVolatile, (item) => `波动系数 ${item.volatility.toFixed(2)}`, "warning"),
+  ].join("");
+
+  $("#capability-body").innerHTML = items.map((item) => {
+    const daily = dailySeries(item.rows, current.start, current.end);
+    const volatilityText = item.volatility == null ? (item.rows.length < 3 ? "样本不足" : item.orders === 0 ? "无出单" : "暂无记录") : item.volatility.toFixed(2);
+    return `<tr data-channel="${item.channel.id}" tabindex="0" title="点击查看${escapeHtml(item.channel.name)}大图趋势">
+      <td><b>${escapeHtml(item.channel.name)}</b><small>${item.rows.length ? `${item.rows.length} 天明细` : "暂无明细"}</small></td>
+      <td><span class="ability-spark">${miniTrendSvg(daily, "orders", `${item.channel.name}有效订单趋势`)}</span></td>
+      <td>${item.orders == null ? "暂无记录" : `${num.format(item.orders)} 单`}</td>
+      <td>${item.commission == null ? "暂无记录" : money.format(item.commission)}</td>
+      <td>${item.gmv == null ? "暂无记录" : money.format(item.gmv)}</td>
+      <td>${percentOrMissing(item.commissionRate, 2, item.rows.length && item.gmv === 0 ? "不适用" : "暂无记录")}</td>
+      <td>${percentOrMissing(item.activeRate)}</td>
+      <td>${growthLabel(item)}</td>
+      <td><span class="volatility ${item.volatility != null && item.volatility >= 1 ? "high" : ""}">${volatilityText}</span></td>
+      <td><span class="signal ${item.recent.tone}">${item.recent.label}</span></td>
+    </tr>`;
+  }).join("");
+  $("#empty-capability").hidden = items.length > 0;
 }
 
 function miniTrendSvg(daily, metric, label) {
