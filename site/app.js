@@ -297,6 +297,7 @@ function rangeFor(period, anchor, first) {
 }
 
 function initialize() {
+  const hasPromotions = state.data.promotions.length > 0;
   $("#periods").innerHTML = periods.map((period) => `<button data-period="${period.k}">${period.l}</button>`).join("");
   $("#metric-tabs").innerHTML = Object.entries(metricNames).map(([key, label]) => `<button data-metric="${key}">${label}</button>`).join("");
   $("#channel-menu").innerHTML = `
@@ -308,7 +309,7 @@ function initialize() {
         <small class="${channel.sourceRowCount ? "" : "missing"}">${channel.sourceRowCount ? "已接入" : "缺明细"}</small>
       </label>
     `).join("")}`;
-  $("#promotion-menu").innerHTML = `
+  $("#promotion-menu").innerHTML = hasPromotions ? `
     <div class="menu-actions"><button data-all="1">全选</button><button data-none="1">清空</button></div>
     ${state.data.promotions.map((promotion) => `
       <label>
@@ -316,7 +317,11 @@ function initialize() {
         <span>${escapeHtml(promotion.name)}</span>
         <small>${escapeHtml(promotion.channelName)}</small>
       </label>
-    `).join("")}` || '<div class="empty">暂无推广位数据</div>';
+    `).join("")}` : '<div class="empty">新推广位来源未提供</div>';
+  const promotionRankButton = $("#ranking-dimension [data-dimension=promotion]");
+  promotionRankButton.disabled = !hasPromotions;
+  promotionRankButton.title = hasPromotions ? "" : "新推广位来源未提供";
+  if (!hasPromotions) state.rankingDimension = "channel";
   $("#sources").innerHTML = "<b>数据来源</b>" + state.data.channels.map((channel) => `<a href="${channel.sourceUrl}" target="_blank" rel="noreferrer">${escapeHtml(channel.name)}</a>`).join("");
 
   $("#periods").onclick = (event) => {
@@ -335,7 +340,7 @@ function initialize() {
   };
   $("#ranking-dimension").onclick = (event) => {
     const dimension = event.target.dataset.dimension;
-    if (dimension) {
+    if (dimension && !event.target.disabled) {
       state.rankingDimension = dimension;
       renderRanking(context());
       syncActiveControls();
@@ -492,7 +497,9 @@ function render() {
   syncActiveControls();
   const current = context();
   $("#channel-summary").textContent = state.selectedChannels.size === state.data.channels.length ? `全部 ${state.data.channels.length} 个` : `已选 ${state.selectedChannels.size} 个`;
-  $("#promotion-summary").textContent = state.selectedPromotions.size === state.data.promotions.length ? `全部 ${state.data.promotions.length} 个` : `已选 ${state.selectedPromotions.size} 个`;
+  $("#promotion-summary").textContent = state.data.promotions.length
+    ? (state.selectedPromotions.size === state.data.promotions.length ? `全部 ${state.data.promotions.length} 个` : `已选 ${state.selectedPromotions.size} 个`)
+    : "来源未提供";
   renderStatus(current);
   renderKpis(current);
   renderChart(current);

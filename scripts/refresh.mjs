@@ -181,10 +181,18 @@ if (!allSourcesOk && previousPayload) {
   process.exit(0);
 }
 
-const rowsByKey = new Map((previousPayload?.rows || []).map((row) => [`${row.channel_id}:${row.stat_date}`, row]));
+const activeChannelIds = new Set(CHANNELS.map(([, id]) => id));
+const activePromotionIds = new Set(PROMOTIONS.map(([, id]) => id));
+const previousRows = previousPayload?.accountId === ACCOUNT_ID
+  ? (previousPayload.rows || []).filter((row) => activeChannelIds.has(row.channel_id))
+  : [];
+const previousPromotionRows = previousPayload?.accountId === ACCOUNT_ID
+  ? (previousPayload.promotionRows || []).filter((row) => activePromotionIds.has(row.promotion_id))
+  : [];
+const rowsByKey = new Map(previousRows.map((row) => [`${row.channel_id}:${row.stat_date}`, row]));
 for (const row of results.flatMap((result) => result.rows)) rowsByKey.set(`${row.channel_id}:${row.stat_date}`, row);
 const rows = [...rowsByKey.values()].sort((a, b) => a.stat_date.localeCompare(b.stat_date) || a.channel_name.localeCompare(b.channel_name, "zh-CN"));
-const promotionRowsByKey = new Map((previousPayload?.promotionRows || []).map((row) => [`${row.promotion_id}:${row.stat_date}`, row]));
+const promotionRowsByKey = new Map(previousPromotionRows.map((row) => [`${row.promotion_id}:${row.stat_date}`, row]));
 for (const row of promotionResults.flatMap((result) => result.rows)) promotionRowsByKey.set(`${row.promotion_id}:${row.stat_date}`, row);
 const promotionRows = [...promotionRowsByKey.values()].sort((a, b) => a.stat_date.localeCompare(b.stat_date) || a.promotion_name.localeCompare(b.promotion_name, "zh-CN"));
 const payload = {
