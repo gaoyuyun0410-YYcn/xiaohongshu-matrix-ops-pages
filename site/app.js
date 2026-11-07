@@ -99,7 +99,6 @@ async function fetchUpstream(kind, item, accountId, fetchedAt) {
     } : {
       promotion_id: item.id,
       promotion_name: item.name,
-      channel_name: item.channelName,
       stat_date: row.statistics_date,
       orders: Number(row.valid_num),
       commission: Number(row.estimate_valid_amount),
@@ -315,7 +314,7 @@ function initialize() {
       <label>
         <input type="checkbox" value="${promotion.id}" checked>
         <span>${escapeHtml(promotion.name)}</span>
-        <small>${escapeHtml(promotion.channelName)}</small>
+        <small class="${promotion.sourceRowCount ? "" : "missing"}">${promotion.sourceRowCount ? "已接入" : "累计 0"}</small>
       </label>
     `).join("")}` : '<div class="empty">新推广位来源未提供</div>';
   const promotionRankButton = $("#ranking-dimension [data-dimension=promotion]");
@@ -383,6 +382,7 @@ function initialize() {
     }
     if (event.target.dataset.none) {
       state.selectedPromotions.clear();
+      state.rankingDimension = "promotion";
       $$("#promotion-menu input").forEach((input) => { input.checked = false; });
       render();
     }
@@ -390,6 +390,7 @@ function initialize() {
   $("#promotion-menu").onchange = (event) => {
     if (event.target.matches("input")) {
       event.target.checked ? state.selectedPromotions.add(event.target.value) : state.selectedPromotions.delete(event.target.value);
+      if (state.selectedPromotions.size !== state.data.promotions.length) state.rankingDimension = "promotion";
       render();
     }
   };
@@ -436,50 +437,42 @@ function context() {
     || new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Shanghai" });
   const [start, end] = rangeFor(state.period, anchor, data.historyStart);
   const channelRows = data.rows.filter((row) => state.selectedChannels.has(row.channel_id) && row.stat_date >= start && row.stat_date <= end);
-  const selectedChannelNames = new Set(data.channels.filter((channel) => state.selectedChannels.has(channel.id)).map((channel) => channel.name));
-  const allChannelsSelected = state.selectedChannels.size === data.channels.length;
-  const eligiblePromotions = data.promotions.filter((promotion) => selectedChannelNames.has(promotion.channelName)
-    || (allChannelsSelected && promotion.channelName === "未关联成员"));
-  const promotions = eligiblePromotions.filter((promotion) => state.selectedPromotions.has(promotion.id));
+  const promotions = data.promotions.filter((promotion) => state.selectedPromotions.has(promotion.id));
   const promotionIds = new Set(promotions.map((promotion) => promotion.id));
   const promotionRows = data.promotionRows.filter((row) => promotionIds.has(row.promotion_id) && row.stat_date >= start && row.stat_date <= end);
-  const promotionSlice = promotions.length !== eligiblePromotions.length;
+  const promotionSlice = promotions.length !== data.promotions.length;
   const selectedChannelRows = data.rows.filter((row) => state.selectedChannels.has(row.channel_id));
   const allSelectedPromotionRows = data.promotionRows.filter((row) => promotionIds.has(row.promotion_id));
-  const analysisRows = promotionSlice ? aggregatePromotionRows(allSelectedPromotionRows, data.channels) : selectedChannelRows;
-  const rows = promotionSlice ? analysisRows.filter((row) => row.stat_date >= start && row.stat_date <= end) : channelRows;
+  const analysisRows = promotionSlice ? normalizePromotionRows(allSelectedPromotionRows) : selectedChannelRows;
+  const rows = promotionSlice ? normalizePromotionRows(promotionRows) : channelRows;
   const days = Math.max(1, Math.round((parseDate(end) - parseDate(start)) / 86400000) + 1);
-  return { data, anchor, start, end, rows, channelRows, promotions, promotionRows, analysisRows, promotionSlice, days };
+  return { data, anchor, start, end, rows, channelRows, promotions, promotionRows, analysisRows, channelAnalysisRows: selectedChannelRows, promotionSlice, days };
 }
 
-function aggregatePromotionRows(rows, channels) {
-  const channelByName = new Map(channels.map((channel) => [channel.name, channel]));
-  const aggregates = new Map();
-  for (const row of rows) {
-    const channel = channelByName.get(row.channel_name);
-    if (!channel) continue;
-    const key = `${channel.id}:${row.stat_date}`;
-    const aggregate = aggregates.get(key) || {
-      channel_id: channel.id,
-      channel_name: channel.name,
-      stat_date: row.stat_date,
-      orders: 0,
-      commission: 0,
-      gmv: 0,
-    };
-    aggregate.orders += Number(row.orders || 0);
-    aggregate.commission += Number(row.commission || 0);
-    aggregate.gmv += Number(row.gmv || 0);
-    aggregates.set(key, aggregate);
-  }
-  return [...aggregates.values()];
+function normalizePromotionRows(rows) {
+  return rows.map((row) => ({
+    channel_id: row.promotion_id,
+    channel_name: row.promotion_name,
+    stat_date: row.stat_date,
+    orders: Number(row.orders || 0),
+    commission: Number(row.commission || 0),
+    gmv: Number(row.gmv || 0),
+  }));
 }
 
 function syncTrendOptions() {
+  const promotionSlice = state.selectedPromotions.size !== state.data.promotions.length;
+  if (promotionSlice) {
+    state.trendChannel = "all";
+    $("#trend-channel").innerHTML = '<option value="all">已选推广位合计</option>';
+    $("#trend-channel").disabled = true;
+    return;
+  }
   const channels = state.data.channels.filter((channel) => state.selectedChannels.has(channel.id));
   if (state.trendChannel !== "all" && !channels.some((channel) => channel.id === state.trendChannel)) state.trendChannel = "all";
   $("#trend-channel").innerHTML = `<option value="all">全部渠道合计</option>${channels.map((channel) => `<option value="${channel.id}">${escapeHtml(channel.name)}</option>`).join("")}`;
   $("#trend-channel").value = state.trendChannel;
+  $("#trend-channel").disabled = false;
 }
 
 function syncActiveControls() {
@@ -517,10 +510,10 @@ function abilityRows(current) {
   const priorEnd = addDays(current.start, -1);
   const priorStart = addDays(priorEnd, -(current.days - 1));
   return current.data.channels.filter((channel) => state.selectedChannels.has(channel.id)).map((channel) => {
-    const rows = current.analysisRows
+    const rows = current.channelAnalysisRows
       .filter((row) => row.channel_id === channel.id && row.stat_date >= current.start && row.stat_date <= current.end)
       .sort((left, right) => left.stat_date.localeCompare(right.stat_date));
-    const priorRows = state.period === "all" ? [] : current.analysisRows
+    const priorRows = state.period === "all" ? [] : current.channelAnalysisRows
       .filter((row) => row.channel_id === channel.id && row.stat_date >= priorStart && row.stat_date <= priorEnd);
     const orders = rows.length ? sum(rows, "orders") : null;
     const commission = rows.length ? sum(rows, "commission") : null;
@@ -583,7 +576,7 @@ function renderCapability(current) {
   const mostVolatile = maxBy("volatility", (item) => item.volatility != null);
   const mostStable = minBy("volatility", (item) => item.volatility != null && item.orders > 0);
   const scope = state.period === "all" ? `${current.start} 至 ${current.end} 的本系统已保存历史` : `${periodNames[state.period]} · ${current.start} 至 ${current.end}`;
-  $("#capability-note").textContent = `${scope}；点击成员行可在上方查看大图趋势`;
+  $("#capability-note").textContent = `${scope}；点击渠道行可在上方查看大图趋势`;
 
   const highlight = (label, item, value, tone = "") => `<div class="capability-highlight ${tone}"><span>${label}</span><b>${item ? escapeHtml(item.channel.name) : "暂无记录"}</b><small>${item ? value(item) : "当前样本不足"}</small></div>`;
   $("#capability-highlights").innerHTML = [
@@ -647,7 +640,7 @@ function renderChannelTrends(current) {
   const channels = current.data.channels.filter((channel) => state.selectedChannels.has(channel.id));
   $("#channel-trends-note").textContent = `${periodNames[state.period]} · 每张卡片显示每日${metricNames[state.metric]}，点击可在上方放大查看`;
   $("#channel-trends").innerHTML = channels.length ? channels.map((channel) => {
-    const rows = current.analysisRows.filter((row) => row.channel_id === channel.id && row.stat_date >= current.start && row.stat_date <= current.end);
+    const rows = current.channelAnalysisRows.filter((row) => row.channel_id === channel.id && row.stat_date >= current.start && row.stat_date <= current.end);
     const daily = dailySeries(rows, current.start, current.end);
     const available = daily.filter((day) => day[state.metric] != null);
     const total = available.length ? sum(available, state.metric) : null;
@@ -756,7 +749,7 @@ function renderChart(current) {
   const sourceRows = state.trendChannel === "all" ? current.rows : current.rows.filter((row) => row.channel_id === state.trendChannel);
   const daily = dailySeries(sourceRows, current.start, current.end);
   const available = daily.filter((day) => day[state.metric] != null);
-  const subject = channel ? channel.name : "全部已选渠道";
+  const subject = current.promotionSlice ? "已选推广位" : channel ? channel.name : "全部已选渠道";
   const sliceLabel = current.promotionSlice ? ` · ${current.promotions.length} 个推广位` : "";
   $("#trend-note").textContent = available.length < current.days
     ? `${subject}存在缺失日期；缺失值保留为“暂无记录”`
@@ -825,17 +818,11 @@ function renderRanking(current) {
     ? current.promotions.map((promotion) => {
       const rows = current.promotionRows.filter((row) => row.promotion_id === promotion.id);
       const value = state.period === "all" ? (promotion.total?.[state.metric] ?? null) : (rows.length ? sum(rows, state.metric) : null);
-      return { id: promotion.id, name: promotion.name, parent: promotion.channelName, value };
+      return { id: promotion.id, name: promotion.name, parent: null, value };
     })
     : current.data.channels.filter((channel) => state.selectedChannels.has(channel.id)).map((channel) => {
-      const rows = current.rows.filter((row) => row.channel_id === channel.id);
-      let value;
-      if (state.period === "all" && current.promotionSlice) {
-        const totals = current.promotions.filter((promotion) => promotion.channelName === channel.name && promotion.total);
-        value = totals.length ? sum(totals.map((promotion) => promotion.total), state.metric) : null;
-      } else {
-        value = state.period === "all" ? (channel.total?.[state.metric] ?? null) : (rows.length ? sum(rows, state.metric) : null);
-      }
+      const rows = current.channelRows.filter((row) => row.channel_id === channel.id);
+      const value = state.period === "all" ? (channel.total?.[state.metric] ?? null) : (rows.length ? sum(rows, state.metric) : null);
       return { id: channel.id, name: channel.name, parent: null, value };
     });
   list.sort((left, right) => (right.value ?? -1) - (left.value ?? -1));
@@ -871,10 +858,10 @@ function tagFor(rows, row) {
 function renderAlerts(current) {
   const list = [];
   for (const channel of current.data.channels.filter((item) => state.selectedChannels.has(item.id))) {
-    const rows = current.analysisRows.filter((row) => row.channel_id === channel.id).sort((left, right) => right.stat_date.localeCompare(left.stat_date));
+    const rows = current.channelAnalysisRows.filter((row) => row.channel_id === channel.id).sort((left, right) => right.stat_date.localeCompare(left.stat_date));
     const currentRow = rows.find((row) => row.stat_date === current.anchor);
     const previousRow = rows.find((row) => row.stat_date === addDays(current.anchor, -1));
-    if (!rows.length) list.push({ tone: "missing", title: `${channel.name}：逐日明细缺失`, detail: current.promotionSlice ? "已选推广位未返回逐日行，未按真实 0 处理。" : "源站未返回逐日行，未按真实 0 处理。" });
+    if (!rows.length) list.push({ tone: "missing", title: `${channel.name}：逐日明细缺失`, detail: "源站未返回逐日行，未按真实 0 处理。" });
     else if (currentRow && previousRow && currentRow.orders > 0 && previousRow.orders === 0) list.push({ tone: "up", title: `${channel.name}：新增出单`, detail: `今日 ${currentRow.orders} 单，昨日为 0 单。` });
     else if (currentRow && previousRow && previousRow.orders >= 2 && currentRow.orders <= previousRow.orders * 0.5) list.push({ tone: "down", title: `${channel.name}：明显回落`, detail: `订单从 ${previousRow.orders} 单降至 ${currentRow.orders} 单。` });
     else if (currentRow && previousRow && currentRow.orders >= Math.max(3, previousRow.orders * 2)) list.push({ tone: "up", title: `${channel.name}：明显放量`, detail: `订单从 ${previousRow.orders} 单升至 ${currentRow.orders} 单。` });

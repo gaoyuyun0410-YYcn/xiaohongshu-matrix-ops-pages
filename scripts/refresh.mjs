@@ -109,7 +109,7 @@ async function fetchChannel([name, id, sourceUrl], fetchedAt) {
   }
 }
 
-async function fetchPromotion([name, id, sourceUrl, channelName], fetchedAt) {
+async function fetchPromotion([name, id, sourceUrl], fetchedAt) {
   const endpoint = new URL("https://alliance.yunzhanxinxi.com/promotion/statistics");
   endpoint.searchParams.set("accountsid", ACCOUNT_ID);
   endpoint.searchParams.set("promotionid", id);
@@ -130,7 +130,6 @@ async function fetchPromotion([name, id, sourceUrl, channelName], fetchedAt) {
         name,
         id,
         sourceUrl,
-        channelName,
         status: "ok",
         error: null,
         total: {
@@ -146,7 +145,6 @@ async function fetchPromotion([name, id, sourceUrl, channelName], fetchedAt) {
       rows: sourceRows.map((row) => ({
         promotion_id: id,
         promotion_name: name,
-        channel_name: channelName,
         stat_date: row.statistics_date,
         orders: Number(row.valid_num),
         commission: Number(row.estimate_valid_amount),
@@ -156,7 +154,7 @@ async function fetchPromotion([name, id, sourceUrl, channelName], fetchedAt) {
     };
   } catch (error) {
     return {
-      promotion: { name, id, sourceUrl, channelName, status: "error", error: error instanceof Error ? error.message : "unknown", total: null, sourceRowCount: 0 },
+      promotion: { name, id, sourceUrl, status: "error", error: error instanceof Error ? error.message : "unknown", total: null, sourceRowCount: 0 },
       rows: [],
     };
   }
