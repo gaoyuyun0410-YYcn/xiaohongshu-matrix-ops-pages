@@ -437,7 +437,9 @@ function context() {
   const [start, end] = rangeFor(state.period, anchor, data.historyStart);
   const channelRows = data.rows.filter((row) => state.selectedChannels.has(row.channel_id) && row.stat_date >= start && row.stat_date <= end);
   const selectedChannelNames = new Set(data.channels.filter((channel) => state.selectedChannels.has(channel.id)).map((channel) => channel.name));
-  const eligiblePromotions = data.promotions.filter((promotion) => selectedChannelNames.has(promotion.channelName));
+  const allChannelsSelected = state.selectedChannels.size === data.channels.length;
+  const eligiblePromotions = data.promotions.filter((promotion) => selectedChannelNames.has(promotion.channelName)
+    || (allChannelsSelected && promotion.channelName === "未关联成员"));
   const promotions = eligiblePromotions.filter((promotion) => state.selectedPromotions.has(promotion.id));
   const promotionIds = new Set(promotions.map((promotion) => promotion.id));
   const promotionRows = data.promotionRows.filter((row) => promotionIds.has(row.promotion_id) && row.stat_date >= start && row.stat_date <= end);
