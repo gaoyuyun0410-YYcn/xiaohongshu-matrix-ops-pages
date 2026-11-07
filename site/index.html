@@ -76,8 +76,8 @@
       <article class="panel"><header><div><h2>补充观察</h2><p>仅展示来源字段可支持的分析</p></div></header><div id="comparison"></div><div class="limits"><b>暂不可用</b><span>高峰下单时段 · 理论/动态预测</span><small>源站未提供小时级数据，且历史长度尚不足以形成稳定预测。</small></div></article>
     </section>
     <section class="panel details">
-      <header><div><h2>日期 × 渠道明细</h2><p>真实 0 保留为 0；未返回的记录不会补零</p></div><label class="search"><span>⌕</span><input id="search" placeholder="搜索渠道" /></label></header>
-      <div class="table-wrap"><table><thead><tr><th data-sort="stat_date">日期 ↓</th><th>渠道</th><th data-sort="orders">订单</th><th data-sort="commission">预估佣金</th><th data-sort="gmv">成交金额</th><th>佣金率</th><th>识别</th></tr></thead><tbody id="detail-body"></tbody></table><div id="empty-detail" class="empty" hidden>暂无记录</div></div>
+      <header><div><h2 id="detail-title">日期 × 渠道明细</h2><p>真实 0 保留为 0；未返回的记录不会补零</p></div><label class="search"><span>⌕</span><input id="search" placeholder="搜索渠道" /></label></header>
+      <div class="table-wrap"><table><thead><tr><th data-sort="stat_date">日期 ↓</th><th id="detail-dimension">渠道</th><th data-sort="orders">订单</th><th data-sort="commission">预估佣金</th><th data-sort="gmv">成交金额</th><th>佣金率</th><th>识别</th></tr></thead><tbody id="detail-body"></tbody></table><div id="empty-detail" class="empty" hidden>暂无记录</div></div>
     </section>
     <footer><div><b>数据口径</b><span>累计：源平台汇总</span><span>周期：源站逐日明细或已保存历史</span><span>缺失：暂无记录</span><span>0：仅保留源站真实 0</span></div><div id="sources"><b>数据来源</b></div></footer>
   </main>

@@ -896,6 +896,10 @@ function renderComparison(current) {
 }
 
 function renderTable(current = context()) {
+  const dimensionLabel = current.promotionSlice ? "推广位" : "渠道";
+  $("#detail-title").textContent = `日期 × ${dimensionLabel}明细`;
+  $("#detail-dimension").textContent = dimensionLabel;
+  $("#search").placeholder = `搜索${dimensionLabel}`;
   const rows = [...current.rows]
     .filter((row) => row.channel_name.includes(state.query.trim()))
     .sort((left, right) => {
