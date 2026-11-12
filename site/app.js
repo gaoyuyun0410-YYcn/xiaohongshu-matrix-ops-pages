@@ -703,6 +703,7 @@ function getTotals(current) {
 function renderKpis(current) {
   const totals = getTotals(current);
   const rate = totals.gmv ? totals.commission / totals.gmv : null;
+  const averageOrderValue = totals.orders ? totals.gmv / totals.orders : null;
   const priorEnd = addDays(current.start, -1);
   const priorStart = addDays(priorEnd, -(current.days - 1));
   const priorRows = current.analysisRows.filter((row) => row.stat_date >= priorStart && row.stat_date <= priorEnd);
@@ -716,6 +717,7 @@ function renderKpis(current) {
     { label: `${prefix}有效订单`, value: totals.hasData ? `${num.format(totals.orders)} 单` : "暂无记录", key: "orders" },
     { label: `${prefix}预估佣金`, value: totals.hasData ? money.format(totals.commission) : "暂无记录", key: "commission" },
     { label: `${prefix}有效成交金额`, value: totals.hasData ? money.format(totals.gmv) : "暂无记录", key: "gmv" },
+    { label: `${prefix}平均每单成交金额`, value: !totals.hasData ? "暂无记录" : averageOrderValue == null ? "不适用" : money.format(averageOrderValue), help: "客单价＝有效成交金额 ÷ 有效订单数" },
     { label: `${prefix}佣金率`, value: !totals.hasData ? "暂无记录" : rate == null ? "不适用" : `${(rate * 100).toFixed(2)}%`, help: current.promotionSlice ? "已选推广位：预估佣金 ÷ 有效成交金额" : "预估佣金 ÷ 有效成交金额" },
   ];
   $("#kpis").innerHTML = items.map((item) => {
