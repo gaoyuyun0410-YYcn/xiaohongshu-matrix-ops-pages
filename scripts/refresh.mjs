@@ -41,9 +41,23 @@ const config = process.env.CHANNEL_CONFIG
   ? JSON.parse(process.env.CHANNEL_CONFIG)
   : decrypt(JSON.parse(await readFile(resolve(process.env.CONFIG_ENCRYPTED_PATH || "config.enc.json"), "utf8")));
 if (!config?.accountId || !Array.isArray(config.channels) || !config.channels.length) throw new Error("Valid encrypted channel config is required");
+const ownerOverrides = new Map(Object.entries(process.env.PROMOTION_OWNER_OVERRIDES
+  ? JSON.parse(process.env.PROMOTION_OWNER_OVERRIDES)
+  : {}).map(([key, owner]) => [key.trim().toLocaleLowerCase("zh-CN"), String(owner).trim()]));
+let ownerOverrideMatches = 0;
+const promotionWithOwner = (promotion) => {
+  const [name, id] = promotion;
+  const owner = ownerOverrides.get(String(name).trim().toLocaleLowerCase("zh-CN"))
+    ?? ownerOverrides.get(String(id).trim().toLocaleLowerCase("zh-CN"));
+  if (owner == null) return promotion;
+  ownerOverrideMatches += 1;
+  const enriched = [...promotion];
+  enriched[3] = owner;
+  return enriched;
+};
 const ACCOUNT_ID = config.accountId;
 const CHANNELS = config.channels;
-const PROMOTIONS = Array.isArray(config.promotions) ? config.promotions : [];
+const PROMOTIONS = Array.isArray(config.promotions) ? config.promotions.map(promotionWithOwner) : [];
 
 async function fetchPreviousPayload() {
   const url = process.env.PREVIOUS_DATA_URL;
@@ -190,7 +204,7 @@ if (!allSourcesOk && previousPayload) {
     lastAttemptAt: fetchedAt,
   };
   await writeFile(outputPath, `${JSON.stringify(encrypt(retainedPayload))}\n`, { mode: 0o600 });
-  console.warn(JSON.stringify({ retainedPrevious: true, fetchedAt: previousPayload.fetchedAt, failedSources: results.filter((result) => result.channel.status !== "ok").length }));
+  console.warn(JSON.stringify({ retainedPrevious: true, fetchedAt: previousPayload.fetchedAt, failedSources: results.filter((result) => result.channel.status !== "ok").length, ownerOverrideMatches }));
   process.exit(0);
 }
 
@@ -222,4 +236,4 @@ const payload = {
 
 if (!results.some((result) => result.channel.status === "ok")) throw new Error("All upstream sources failed and no previous deployment is available");
 await writeFile(outputPath, `${JSON.stringify(encrypt(payload))}\n`, { mode: 0o600 });
-console.log(JSON.stringify({ outputPath, fetchedAt, channels: payload.channels.length, promotions: payload.promotions.length, ok: payload.channels.filter((channel) => channel.status === "ok").length + payload.promotions.filter((promotion) => promotion.status === "ok").length, rows: rows.length, promotionRows: promotionRows.length }));
+console.log(JSON.stringify({ outputPath, fetchedAt, channels: payload.channels.length, promotions: payload.promotions.length, ownerOverrideMatches, ok: payload.channels.filter((channel) => channel.status === "ok").length + payload.promotions.filter((promotion) => promotion.status === "ok").length, rows: rows.length, promotionRows: promotionRows.length }));

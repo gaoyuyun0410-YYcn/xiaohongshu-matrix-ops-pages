@@ -33,6 +33,7 @@ jobs:
       - name: Refresh and encrypt dashboard data
         env:
           DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
+          PROMOTION_OWNER_OVERRIDES: ${{ secrets.PROMOTION_OWNER_OVERRIDES }}
           CONFIG_ENCRYPTED_PATH: config.enc.json
           OUTPUT_PATH: site/data.enc.json
           PREVIOUS_DATA_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/data.enc.json
