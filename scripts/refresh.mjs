@@ -47,8 +47,15 @@ const ownerOverrides = new Map(Object.entries(process.env.PROMOTION_OWNER_OVERRI
 let ownerOverrideMatches = 0;
 const promotionWithOwner = (promotion) => {
   const [name, id] = promotion;
-  const owner = ownerOverrides.get(String(name).trim().toLocaleLowerCase("zh-CN"))
-    ?? ownerOverrides.get(String(id).trim().toLocaleLowerCase("zh-CN"));
+  const normalizedName = String(name).trim().toLocaleLowerCase("zh-CN");
+  const normalizedId = String(id).trim().toLocaleLowerCase("zh-CN");
+  let owner = ownerOverrides.get(normalizedName) ?? ownerOverrides.get(normalizedId);
+  if (owner == null) {
+    const embeddedMatches = [...ownerOverrides.entries()]
+      .filter(([key]) => normalizedName.includes(key))
+      .sort(([left], [right]) => right.length - left.length);
+    if (embeddedMatches.length) owner = embeddedMatches[0][1];
+  }
   if (owner == null) return promotion;
   ownerOverrideMatches += 1;
   const enriched = [...promotion];
