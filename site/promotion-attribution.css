@@ -1,0 +1,24 @@
+.promotion-identity {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.promotion-identity b,
+.promotion-identity em {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.promotion-identity b {
+  color: #2d3740;
+  font-size: 12px;
+}
+
+.promotion-identity em {
+  color: #929aa1;
+  font-size: 10px;
+  font-style: normal;
+}

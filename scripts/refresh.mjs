@@ -109,7 +109,7 @@ async function fetchChannel([name, id, sourceUrl], fetchedAt) {
   }
 }
 
-async function fetchPromotion([name, id, sourceUrl], fetchedAt) {
+async function fetchPromotion([name, id, sourceUrl, channelName], fetchedAt) {
   const endpoint = new URL("https://alliance.yunzhanxinxi.com/promotion/statistics");
   endpoint.searchParams.set("accountsid", ACCOUNT_ID);
   endpoint.searchParams.set("promotionid", id);
@@ -130,6 +130,7 @@ async function fetchPromotion([name, id, sourceUrl], fetchedAt) {
         name,
         id,
         sourceUrl,
+        channelName,
         status: "ok",
         error: null,
         total: {
@@ -145,6 +146,7 @@ async function fetchPromotion([name, id, sourceUrl], fetchedAt) {
       rows: sourceRows.map((row) => ({
         promotion_id: id,
         promotion_name: name,
+        channel_name: channelName,
         stat_date: row.statistics_date,
         orders: Number(row.valid_num),
         commission: Number(row.estimate_valid_amount),
@@ -154,7 +156,7 @@ async function fetchPromotion([name, id, sourceUrl], fetchedAt) {
     };
   } catch (error) {
     return {
-      promotion: { name, id, sourceUrl, status: "error", error: error instanceof Error ? error.message : "unknown", total: null, sourceRowCount: 0 },
+      promotion: { name, id, sourceUrl, channelName, status: "error", error: error instanceof Error ? error.message : "unknown", total: null, sourceRowCount: 0 },
       rows: [],
     };
   }
@@ -174,7 +176,20 @@ const allSourcesOk = results.every((result) => result.channel.status === "ok") &
 const outputPath = process.env.OUTPUT_PATH ? resolve(process.env.OUTPUT_PATH) : resolve(dirname(fileURLToPath(import.meta.url)), "..", "data.enc.json");
 await mkdir(dirname(outputPath), { recursive: true });
 if (!allSourcesOk && previousPayload) {
-  await writeFile(outputPath, `${JSON.stringify(encrypt({ ...previousPayload, lastAttemptAt: fetchedAt }))}\n`, { mode: 0o600 });
+  const promotionChannelById = new Map(PROMOTIONS.map(([, id, , channelName]) => [id, channelName]));
+  const retainedPayload = {
+    ...previousPayload,
+    promotions: (previousPayload.promotions || []).map((promotion) => ({
+      ...promotion,
+      channelName: promotionChannelById.get(promotion.id) || promotion.channelName,
+    })),
+    promotionRows: (previousPayload.promotionRows || []).map((row) => ({
+      ...row,
+      channel_name: promotionChannelById.get(row.promotion_id) || row.channel_name,
+    })),
+    lastAttemptAt: fetchedAt,
+  };
+  await writeFile(outputPath, `${JSON.stringify(encrypt(retainedPayload))}\n`, { mode: 0o600 });
   console.warn(JSON.stringify({ retainedPrevious: true, fetchedAt: previousPayload.fetchedAt, failedSources: results.filter((result) => result.channel.status !== "ok").length }));
   process.exit(0);
 }

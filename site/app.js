@@ -99,6 +99,7 @@ async function fetchUpstream(kind, item, accountId, fetchedAt) {
     } : {
       promotion_id: item.id,
       promotion_name: item.name,
+      channel_name: item.channelName,
       stat_date: row.statistics_date,
       orders: Number(row.valid_num),
       commission: Number(row.estimate_valid_amount),
@@ -313,7 +314,10 @@ function initialize() {
     ${state.data.promotions.map((promotion) => `
       <label>
         <input type="checkbox" value="${promotion.id}" checked>
-        <span>${escapeHtml(promotion.name)}</span>
+        <span class="promotion-identity">
+          <b>${escapeHtml(promotion.name)}</b>
+          <em>渠道 · ${escapeHtml(promotion.channelName || "待归属")}</em>
+        </span>
         <small class="${promotion.sourceRowCount ? "" : "missing"}">${promotion.sourceRowCount ? "已接入" : "累计 0"}</small>
       </label>
     `).join("")}` : '<div class="empty">新推广位来源未提供</div>';
@@ -818,7 +822,7 @@ function renderRanking(current) {
     ? current.promotions.map((promotion) => {
       const rows = current.promotionRows.filter((row) => row.promotion_id === promotion.id);
       const value = state.period === "all" ? (promotion.total?.[state.metric] ?? null) : (rows.length ? sum(rows, state.metric) : null);
-      return { id: promotion.id, name: promotion.name, parent: null, value };
+      return { id: promotion.id, name: promotion.name, parent: `渠道 · ${promotion.channelName || "待归属"}`, value };
     })
     : current.data.channels.filter((channel) => state.selectedChannels.has(channel.id)).map((channel) => {
       const rows = current.channelRows.filter((row) => row.channel_id === channel.id);
