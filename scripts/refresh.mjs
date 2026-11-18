@@ -193,35 +193,19 @@ const promotionResults = [];
 for (let index = 0; index < PROMOTIONS.length; index += 6) {
   promotionResults.push(...await Promise.all(PROMOTIONS.slice(index, index + 6).map((promotion) => fetchPromotion(promotion, fetchedAt))));
 }
-const allSourcesOk = results.every((result) => result.channel.status === "ok") && promotionResults.every((result) => result.promotion.status === "ok");
 const outputPath = process.env.OUTPUT_PATH ? resolve(process.env.OUTPUT_PATH) : resolve(dirname(fileURLToPath(import.meta.url)), "..", "data.enc.json");
 await mkdir(dirname(outputPath), { recursive: true });
-if (!allSourcesOk && previousPayload) {
-  const promotionChannelById = new Map(PROMOTIONS.map(([, id, , channelName]) => [id, channelName]));
-  const retainedPayload = {
-    ...previousPayload,
-    promotions: (previousPayload.promotions || []).map((promotion) => ({
-      ...promotion,
-      channelName: promotionChannelById.get(promotion.id) || promotion.channelName,
-    })),
-    promotionRows: (previousPayload.promotionRows || []).map((row) => ({
-      ...row,
-      channel_name: promotionChannelById.get(row.promotion_id) || row.channel_name,
-    })),
-    lastAttemptAt: fetchedAt,
-  };
-  await writeFile(outputPath, `${JSON.stringify(encrypt(retainedPayload))}\n`, { mode: 0o600 });
-  console.warn(JSON.stringify({ retainedPrevious: true, fetchedAt: previousPayload.fetchedAt, failedSources: results.filter((result) => result.channel.status !== "ok").length, ownerOverrideMatches }));
-  process.exit(0);
-}
 
 const activeChannelIds = new Set(CHANNELS.map(([, id]) => id));
 const activePromotionIds = new Set(PROMOTIONS.map(([, id]) => id));
+const promotionChannelById = new Map(PROMOTIONS.map(([, id, , channelName]) => [id, channelName]));
 const previousRows = previousPayload?.accountId === ACCOUNT_ID
   ? (previousPayload.rows || []).filter((row) => activeChannelIds.has(row.channel_id))
   : [];
 const previousPromotionRows = previousPayload?.accountId === ACCOUNT_ID
-  ? (previousPayload.promotionRows || []).filter((row) => activePromotionIds.has(row.promotion_id))
+  ? (previousPayload.promotionRows || [])
+    .filter((row) => activePromotionIds.has(row.promotion_id))
+    .map((row) => ({ ...row, channel_name: promotionChannelById.get(row.promotion_id) || row.channel_name }))
   : [];
 const rowsByKey = new Map(previousRows.map((row) => [`${row.channel_id}:${row.stat_date}`, row]));
 for (const row of results.flatMap((result) => result.rows)) rowsByKey.set(`${row.channel_id}:${row.stat_date}`, row);
@@ -229,18 +213,49 @@ const rows = [...rowsByKey.values()].sort((a, b) => a.stat_date.localeCompare(b.
 const promotionRowsByKey = new Map(previousPromotionRows.map((row) => [`${row.promotion_id}:${row.stat_date}`, row]));
 for (const row of promotionResults.flatMap((result) => result.rows)) promotionRowsByKey.set(`${row.promotion_id}:${row.stat_date}`, row);
 const promotionRows = [...promotionRowsByKey.values()].sort((a, b) => a.stat_date.localeCompare(b.stat_date) || a.promotion_name.localeCompare(b.promotion_name, "zh-CN"));
+const previousChannelById = new Map((previousPayload?.channels || []).map((channel) => [channel.id, channel]));
+const previousPromotionById = new Map((previousPayload?.promotions || []).map((promotion) => [promotion.id, promotion]));
+const channels = results.map(({ channel }) => {
+  if (channel.status === "ok") return channel;
+  const previous = previousChannelById.get(channel.id);
+  return previous ? {
+    ...previous,
+    name: channel.name,
+    sourceUrl: channel.sourceUrl,
+    status: "stale",
+    error: channel.error,
+  } : channel;
+});
+const promotions = promotionResults.map(({ promotion }) => {
+  if (promotion.status === "ok") return promotion;
+  const previous = previousPromotionById.get(promotion.id);
+  return previous ? {
+    ...previous,
+    name: promotion.name,
+    sourceUrl: promotion.sourceUrl,
+    channelName: promotion.channelName,
+    status: "stale",
+    error: promotion.error,
+  } : promotion;
+});
+const sourceFailures = [
+  ...results.filter(({ channel }) => channel.status !== "ok").map(({ channel }) => ({ type: "channel", id: channel.id, name: channel.name, error: channel.error })),
+  ...promotionResults.filter(({ promotion }) => promotion.status !== "ok").map(({ promotion }) => ({ type: "promotion", id: promotion.id, name: promotion.name, error: promotion.error })),
+];
 const payload = {
   fetchedAt,
+  lastAttemptAt: fetchedAt,
   refreshSeconds: 300,
   accountId: ACCOUNT_ID,
   sourceWindow: "渠道与推广位近30天逐日明细 + GitHub 已保存历史 + 平台累计汇总",
   historyStart: rows[0]?.stat_date || null,
-  channels: results.map((result) => result.channel),
+  channels,
   rows,
-  promotions: promotionResults.map((result) => result.promotion),
+  promotions,
   promotionRows,
+  sourceFailures,
 };
 
-if (!results.some((result) => result.channel.status === "ok")) throw new Error("All upstream sources failed and no previous deployment is available");
+if (!results.some((result) => result.channel.status === "ok") && !previousRows.length) throw new Error("All channel sources failed and no previous deployment is available");
 await writeFile(outputPath, `${JSON.stringify(encrypt(payload))}\n`, { mode: 0o600 });
-console.log(JSON.stringify({ outputPath, fetchedAt, channels: payload.channels.length, promotions: payload.promotions.length, ownerOverrideMatches, ok: payload.channels.filter((channel) => channel.status === "ok").length + payload.promotions.filter((promotion) => promotion.status === "ok").length, rows: rows.length, promotionRows: promotionRows.length }));
+console.log(JSON.stringify({ outputPath, fetchedAt, channels: payload.channels.length, promotions: payload.promotions.length, ownerOverrideMatches, ok: results.filter(({ channel }) => channel.status === "ok").length + promotionResults.filter(({ promotion }) => promotion.status === "ok").length, failedSources: sourceFailures.length, rows: rows.length, promotionRows: promotionRows.length }));
